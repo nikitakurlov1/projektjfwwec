@@ -1,114 +1,160 @@
 import pygame
 import random
+import os
+import json
 
 pygame.init()
-
 WINDOW_SIZE = 800
-window = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
+FPS = 60
+GRAVITY = 0.8
+JUMP_POWER = -15
+OBSTACLE_INTERVAL = 90
+
+screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
+pygame.display.set_caption("Neon Runner")
 clock = pygame.time.Clock()
+font = pygame.font.Font(None, 36)
 
-# Параметры игрока
+# Кольори
+WHITE = (255, 255, 255)
+PLAYER_COLOR = (0, 255, 150)
+OBSTACLE_COLOR = (255, 50, 100)
+GROUND_COLOR = (40, 40, 80)
+BG_COLOR = (15, 15, 35)
 PLAYER_SIZE = 40
-player_x = 50
-player_y = WINDOW_SIZE - PLAYER_SIZE - 10
-player_velocity = 0
-gravity = 1.5
-jump_power = -25
 
-# Параметры игры
-obstacles = []
-min_obstacle_distance = 1200  # Увеличено расстояние между препятствиями
-game_speed = 1.5
-speed_increase = 0.1
-score = 0
+# Гравець
+class Player:
+    def __init__(self):
+        self.size = PLAYER_SIZE
+        self.x = 100
+        self.y = WINDOW_SIZE - 80 - self.size
+        self.vel_y = 0
+        self.on_ground = True
+        self.speed = 0
 
-def create_bush_segments(x, base_width, base_height):
-    segments = []
-    segment_count = random.randint(3, 5)
-    for i in range(segment_count):
-        segment_width = base_width // segment_count
-        segment_height = random.randint(10, 20)
-        segment_x = x + (i * segment_width)
-        segments.append({
-            'x': segment_x,
-            'width': segment_width,
-            'height': segment_height,
-            'y': base_height - segment_height
-        })
-    return segments
+    def jump(self):
+        if self.on_ground:
+            self.vel_y = JUMP_POWER
+            self.on_ground = False
 
-def create_obstacle():
-    # Создаем препятствие-куст
-    is_wide = random.random() < 0.3  # 30% шанс широкого препятствия
-    base_width = random.randint(120, 200) if is_wide else random.randint(30, 50)
-    base_height = random.randint(40, 60)
-    base_y = WINDOW_SIZE - base_height - 10
-    
-    obstacle = {
-        'x': WINDOW_SIZE,
-        'width': base_width,
-        'height': base_height,
-        'y': base_y,
-        'is_bush': True,
-        'segments': create_bush_segments(WINDOW_SIZE, base_width, base_y)
-    }
-    return obstacle
+    def update(self):
+        self.vel_y += GRAVITY
+        self.y += self.vel_y
 
-running = True
-while running:
+        ground_y = WINDOW_SIZE - 80 - self.size
+        if self.y >= ground_y:
+            self.y = ground_y
+            self.vel_y = 0
+            self.on_ground = True
+
+        self.speed += 0.01
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, PLAYER_COLOR, (self.x, self.y, self.size, self.size))
+
+    def get_rect(self):
+        return pygame.Rect(self.x, self.y, self.size, self.size)
+
+# Перешкоди
+class Obstacle:
+    def __init__(self):
+        self.width = 30
+        self.height = random.randint(40, 70)
+        self.x = WINDOW_SIZE
+        self.y = WINDOW_SIZE - 80 - self.height
+        self.speed = 6
+
+    def update(self):
+        self.x -= self.speed
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, OBSTACLE_COLOR, (self.x, self.y, self.width, self.height))
+
+    def get_rect(self):
+        return pygame.Rect(self.x, self.y, self.width, self.height)
+
+# Гра
+class Game:
+    def __init__(self):
+        self.player = Player()
+        self.obstacles = []
+        self.score = 0
+        self.spawn_timer = OBSTACLE_INTERVAL
+        self.running = True
+        self.game_over = False
+        self.high_score = self.load_high_score()
+
+    def load_high_score(self):
+        if os.path.exists("high_score.json"):
+            with open("high_score.json", "r") as f:
+                return json.load(f).get("high_score", 0)
+        return 0
+
+    def save_high_score(self):
+        with open("high_score.json", "w") as f:
+            json.dump({"high_score": self.high_score}, f)
+
+    def reset(self):
+        self.__init__()
+
+    def update(self):
+        if self.game_over:
+            return
+
+        self.player.update()
+
+        self.spawn_timer -= 1
+        if self.spawn_timer <= 0:
+            self.obstacles.append(Obstacle())
+            self.spawn_timer = OBSTACLE_INTERVAL
+
+        for obs in self.obstacles[:]:
+            obs.update()
+            if obs.x + obs.width < 0:
+                self.obstacles.remove(obs)
+                self.score += 1
+
+            if self.player.get_rect().colliderect(obs.get_rect()):
+                self.game_over = True
+                if self.score > self.high_score:
+                    self.high_score = self.score
+                    self.save_high_score()
+
+    def draw(self):
+        screen.fill(BG_COLOR)
+        pygame.draw.rect(screen, GROUND_COLOR, (0, WINDOW_SIZE - 80, WINDOW_SIZE, 80))
+
+        self.player.draw(screen)
+        for obs in self.obstacles:
+            obs.draw(screen)
+
+        score_text = font.render(f"Score: {self.score}", True, WHITE)
+        screen.blit(score_text, (10, 10))
+
+        if self.game_over:
+            over_text = font.render("Game Over! Press R to restart", True, WHITE)
+            screen.blit(over_text, (WINDOW_SIZE//2 - 160, WINDOW_SIZE//2))
+
+        high_score_text = font.render(f"High Score: {self.high_score}", True, WHITE)
+        screen.blit(high_score_text, (10, 40))
+
+# Основний цикл
+game = Game()
+
+while game.running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            if player_y >= WINDOW_SIZE - PLAYER_SIZE - 10:
-                player_velocity = jump_power
+            game.running = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                game.player.jump()
+            elif event.key == pygame.K_r and game.game_over:
+                game.reset()
 
-    # Физика прыжка
-    player_velocity += gravity
-    player_y += player_velocity
-    if player_y > WINDOW_SIZE - PLAYER_SIZE - 10:
-        player_y = WINDOW_SIZE - PLAYER_SIZE - 10
-        player_velocity = 0
-
-    # Создание препятствий
-    if not obstacles or WINDOW_SIZE - obstacles[-1]['x'] >= min_obstacle_distance:
-        obstacles.append(create_obstacle())
-
-    # Движение препятствий и подсчет очков
-    for obstacle in obstacles[:]:
-        move_distance = 8 * game_speed
-        obstacle['x'] -= move_distance
-        # Обновляем позиции сегментов куста
-        for segment in obstacle['segments']:
-            segment['x'] -= move_distance
-        
-        if obstacle['x'] < -30:
-            obstacles.remove(obstacle)
-            score += 1
-            game_speed += speed_increase
-
-    # Проверка столкновений
-    player_rect = pygame.Rect(player_x, player_y, PLAYER_SIZE, PLAYER_SIZE)
-    for obstacle in obstacles:
-        if player_rect.colliderect(pygame.Rect(obstacle['x'], obstacle['y'], 
-                                              obstacle['width'], obstacle['height'])):
-            running = False
-
-    # Отрисовка
-    window.fill((255, 255, 255))
-    pygame.draw.rect(window, (0, 0, 0), player_rect)
-    for obstacle in obstacles:
-        # Отрисовка основания куста
-        pygame.draw.rect(window, (34, 139, 34), 
-                        (obstacle['x'], obstacle['y'], 
-                         obstacle['width'], obstacle['height']))
-        # Отрисовка верхних сегментов куста
-        for segment in obstacle['segments']:
-            pygame.draw.rect(window, (0, 100, 0),
-                           (segment['x'], segment['y'],
-                            segment['width'], segment['height']))
-
-    pygame.display.update()
-    clock.tick(60)
+    game.update()
+    game.draw()
+    pygame.display.flip()
+    clock.tick(FPS)
 
 pygame.quit()
