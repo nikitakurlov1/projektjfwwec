@@ -1,37 +1,35 @@
-import pygame
+import tkinter as tk
 import random
 import os
 import json
 
-pygame.init()
 WINDOW_SIZE = 800
 FPS = 60
 GRAVITY = 0.8
 JUMP_POWER = -15
 OBSTACLE_INTERVAL = 90
 
-screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
-pygame.display.set_caption("Neon Runner")
-clock = pygame.time.Clock()
-font = pygame.font.Font(None, 36)
-
 # Кольори
-WHITE = (255, 255, 255)
-PLAYER_COLOR = (0, 255, 150)
-OBSTACLE_COLOR = (255, 50, 100)
-GROUND_COLOR = (40, 40, 80)
-BG_COLOR = (15, 15, 35)
+WHITE = "#ffffff"
+PLAYER_COLOR = "#00ff96"
+OBSTACLE_COLOR = "#ff3264"
+GROUND_COLOR = "#282850"
+BG_COLOR = "#0f0f23"
 PLAYER_SIZE = 40
 
-# Гравець
 class Player:
-    def __init__(self):
+    def __init__(self, canvas):
+        self.canvas = canvas
         self.size = PLAYER_SIZE
         self.x = 100
         self.y = WINDOW_SIZE - 80 - self.size
         self.vel_y = 0
         self.on_ground = True
         self.speed = 0
+        self.rect = self.canvas.create_rectangle(
+            self.x, self.y, self.x + self.size, self.y + self.size,
+            fill=PLAYER_COLOR, outline=""
+        )
 
     def jump(self):
         if self.on_ground:
@@ -49,56 +47,83 @@ class Player:
             self.on_ground = True
 
         self.speed += 0.01
+        self.canvas.coords(
+            self.rect, self.x, self.y, self.x + self.size, self.y + self.size
+        )
 
-    def draw(self, surface):
-        pygame.draw.rect(surface, PLAYER_COLOR, (self.x, self.y, self.size, self.size))
+    def get_coords(self):
+        return (self.x, self.y, self.x + self.size, self.y + self.size)
 
-    def get_rect(self):
-        return pygame.Rect(self.x, self.y, self.size, self.size)
-
-# Перешкоди
 class Obstacle:
-    def __init__(self):
+    def __init__(self, canvas):
+        self.canvas = canvas
         self.width = 30
         self.height = random.randint(40, 70)
         self.x = WINDOW_SIZE
         self.y = WINDOW_SIZE - 80 - self.height
         self.speed = 6
+        self.rect = self.canvas.create_rectangle(
+            self.x, self.y, self.x + self.width, self.y + self.height,
+            fill=OBSTACLE_COLOR, outline=""
+        )
 
     def update(self):
         self.x -= self.speed
+        self.canvas.coords(
+            self.rect, self.x, self.y, self.x + self.width, self.y + self.height
+        )
 
-    def draw(self, surface):
-        pygame.draw.rect(surface, OBSTACLE_COLOR, (self.x, self.y, self.width, self.height))
+    def get_coords(self):
+        return (self.x, self.y, self.x + self.width, self.y + self.height)
 
-    def get_rect(self):
-        return pygame.Rect(self.x, self.y, self.width, self.height)
-
-# Гра
 class Game:
-    def __init__(self):
-        self.player = Player()
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Neon Runner")
+        
+        self.canvas = tk.Canvas(root, width=WINDOW_SIZE, height=WINDOW_SIZE, bg=BG_COLOR)
+        self.canvas.pack()
+        
+        self.ground = self.canvas.create_rectangle(
+            0, WINDOW_SIZE - 80, WINDOW_SIZE, WINDOW_SIZE,
+            fill=GROUND_COLOR, outline=""
+        )
+        
+        self.player = Player(self.canvas)
         self.obstacles = []
         self.score = 0
         self.spawn_timer = OBSTACLE_INTERVAL
         self.running = True
         self.game_over = False
         self.high_score = self.load_high_score()
-
+        
+        self.score_text = self.canvas.create_text(10, 10, anchor="nw", text=f"Score: {self.score}", fill=WHITE)
+        self.high_score_text = self.canvas.create_text(10, 40, anchor="nw", text=f"High Score: {self.high_score}", fill=WHITE)
+        self.game_over_text = None
+        
+        self.root.bind("<space>", lambda e: self.player.jump())
+        self.root.bind("<r>", lambda e: self.reset() if self.game_over else None)
+        
+        self.update()
+    
     def load_high_score(self):
         if os.path.exists("high_score.json"):
             with open("high_score.json", "r") as f:
                 return json.load(f).get("high_score", 0)
         return 0
-
+    
     def save_high_score(self):
         with open("high_score.json", "w") as f:
             json.dump({"high_score": self.high_score}, f)
-
+    
     def reset(self):
-        self.__init__()
-
+        self.canvas.delete("all")
+        self.__init__(self.root)
+    
     def update(self):
+        if not self.running:
+            return
+            
         if self.game_over:
             return
 
@@ -106,55 +131,37 @@ class Game:
 
         self.spawn_timer -= 1
         if self.spawn_timer <= 0:
-            self.obstacles.append(Obstacle())
+            self.obstacles.append(Obstacle(self.canvas))
             self.spawn_timer = OBSTACLE_INTERVAL
 
         for obs in self.obstacles[:]:
             obs.update()
             if obs.x + obs.width < 0:
                 self.obstacles.remove(obs)
+                self.canvas.delete(obs.rect)
                 self.score += 1
+                self.canvas.itemconfig(self.score_text, text=f"Score: {self.score}")
 
-            if self.player.get_rect().colliderect(obs.get_rect()):
+            if self.check_collision(self.player.get_coords(), obs.get_coords()):
                 self.game_over = True
                 if self.score > self.high_score:
                     self.high_score = self.score
                     self.save_high_score()
+                    self.canvas.itemconfig(self.high_score_text, text=f"High Score: {self.high_score}")
+                
+                self.game_over_text = self.canvas.create_text(
+                    WINDOW_SIZE//2, WINDOW_SIZE//2, 
+                    text="Game Over! Press R to restart", 
+                    fill=WHITE, font=("Arial", 24)
+                )
 
-    def draw(self):
-        screen.fill(BG_COLOR)
-        pygame.draw.rect(screen, GROUND_COLOR, (0, WINDOW_SIZE - 80, WINDOW_SIZE, 80))
+        self.root.after(1000//FPS, self.update)
+    
+    def check_collision(self, rect1, rect2):
+        # rect format: (x1, y1, x2, y2)
+        return not (rect1[2] < rect2[0] or rect1[0] > rect2[2] or 
+                   rect1[3] < rect2[1] or rect1[1] > rect2[3])
 
-        self.player.draw(screen)
-        for obs in self.obstacles:
-            obs.draw(screen)
-
-        score_text = font.render(f"Score: {self.score}", True, WHITE)
-        screen.blit(score_text, (10, 10))
-
-        if self.game_over:
-            over_text = font.render("Game Over! Press R to restart", True, WHITE)
-            screen.blit(over_text, (WINDOW_SIZE//2 - 160, WINDOW_SIZE//2))
-
-        high_score_text = font.render(f"High Score: {self.high_score}", True, WHITE)
-        screen.blit(high_score_text, (10, 40))
-
-# Основний цикл
-game = Game()
-
-while game.running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            game.running = False
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                game.player.jump()
-            elif event.key == pygame.K_r and game.game_over:
-                game.reset()
-
-    game.update()
-    game.draw()
-    pygame.display.flip()
-    clock.tick(FPS)
-
-pygame.quit()
+root = tk.Tk()
+game = Game(root)
+root.mainloop()
