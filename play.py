@@ -1,7 +1,5 @@
 import tkinter as tk
 import random
-import os
-import json
 
 WINDOW_SIZE = 800
 FPS = 60
@@ -25,7 +23,6 @@ class Player:
         self.y = WINDOW_SIZE - 80 - self.size
         self.vel_y = 0
         self.on_ground = True
-        self.speed = 0
         self.rect = self.canvas.create_rectangle(
             self.x, self.y, self.x + self.size, self.y + self.size,
             fill=PLAYER_COLOR, outline=""
@@ -46,7 +43,6 @@ class Player:
             self.vel_y = 0
             self.on_ground = True
 
-        self.speed += 0.01
         self.canvas.coords(
             self.rect, self.x, self.y, self.x + self.size, self.y + self.size
         )
@@ -55,13 +51,13 @@ class Player:
         return (self.x, self.y, self.x + self.size, self.y + self.size)
 
 class Obstacle:
-    def __init__(self, canvas):
+    def __init__(self, canvas, speed):
         self.canvas = canvas
         self.width = 30
         self.height = random.randint(40, 70)
         self.x = WINDOW_SIZE
         self.y = WINDOW_SIZE - 80 - self.height
-        self.speed = 6
+        self.speed = speed
         self.rect = self.canvas.create_rectangle(
             self.x, self.y, self.x + self.width, self.y + self.height,
             fill=OBSTACLE_COLOR, outline=""
@@ -80,58 +76,63 @@ class Game:
     def __init__(self, root):
         self.root = root
         self.root.title("Neon Runner")
-        
         self.canvas = tk.Canvas(root, width=WINDOW_SIZE, height=WINDOW_SIZE, bg=BG_COLOR)
         self.canvas.pack()
-        
-        self.ground = self.canvas.create_rectangle(
-            0, WINDOW_SIZE - 80, WINDOW_SIZE, WINDOW_SIZE,
-            fill=GROUND_COLOR, outline=""
-        )
-        
-        self.player = Player(self.canvas)
-        self.obstacles = []
+
+        self.menu_frame = tk.Frame(root, bg=BG_COLOR)
+        self.menu_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Button(self.menu_frame, text="Старт", width=15, command=self.start_game).pack(pady=5)
+        tk.Button(self.menu_frame, text="Управление", width=15, command=self.show_controls).pack(pady=5)
+        tk.Button(self.menu_frame, text="Выход", width=15, command=self.root.quit).pack(pady=5)
+
+        self.controls_window = None
+
+    def show_controls(self):
+        if self.controls_window and tk.Toplevel.winfo_exists(self.controls_window):
+            return
+        self.controls_window = tk.Toplevel(self.root)
+        self.controls_window.title("Управление")
+        tk.Label(self.controls_window, text="Пробел — прыжок\nR — перезапуск", font=("Arial", 14)).pack(padx=20, pady=20)
+
+    def start_game(self):
+        self.menu_frame.destroy()
         self.score = 0
+        self.speed = 6
+        self.timer = 0
         self.spawn_timer = OBSTACLE_INTERVAL
+        self.obstacles = []
         self.running = True
         self.game_over = False
-        self.high_score = self.load_high_score()
-        
-        self.score_text = self.canvas.create_text(10, 10, anchor="nw", text=f"Score: {self.score}", fill=WHITE)
-        self.high_score_text = self.canvas.create_text(10, 40, anchor="nw", text=f"High Score: {self.high_score}", fill=WHITE)
-        self.game_over_text = None
-        
-        self.root.bind("<space>", lambda e: self.player.jump())
-        self.root.bind("<r>", lambda e: self.reset() if self.game_over else None)
-        
-        self.update()
-    
-    def load_high_score(self):
-        if os.path.exists("high_score.json"):
-            with open("high_score.json", "r") as f:
-                return json.load(f).get("high_score", 0)
-        return 0
-    
-    def save_high_score(self):
-        with open("high_score.json", "w") as f:
-            json.dump({"high_score": self.high_score}, f)
-    
-    def reset(self):
+
         self.canvas.delete("all")
-        self.__init__(self.root)
-    
-    def update(self):
-        if not self.running:
-            return
-            
-        if self.game_over:
+        self.ground = self.canvas.create_rectangle(0, WINDOW_SIZE - 80, WINDOW_SIZE, WINDOW_SIZE, fill=GROUND_COLOR, outline="")
+        self.player = Player(self.canvas)
+
+        self.score_text = self.canvas.create_text(10, 10, anchor="nw", text=f"Score: {self.score}", fill=WHITE)
+        self.button_counter = 0
+        self.button_counter_text = self.canvas.create_text(10, 40, anchor="nw", text=f"Space pressed: {self.button_counter}", fill=WHITE)
+
+        self.root.bind("<space>", self.space_pressed)
+        self.root.bind("<r>", lambda e: self.start_game() if self.game_over else None)
+
+        self.update_game()
+        self.increase_speed()
+
+    def space_pressed(self, event):
+        self.player.jump()
+        self.button_counter += 1
+        self.canvas.itemconfig(self.button_counter_text, text=f"Space pressed: {self.button_counter}")
+
+    def update_game(self):
+        if not self.running or self.game_over:
             return
 
         self.player.update()
 
         self.spawn_timer -= 1
         if self.spawn_timer <= 0:
-            self.obstacles.append(Obstacle(self.canvas))
+            self.obstacles.append(Obstacle(self.canvas, self.speed))
             self.spawn_timer = OBSTACLE_INTERVAL
 
         for obs in self.obstacles[:]:
@@ -144,23 +145,23 @@ class Game:
 
             if self.check_collision(self.player.get_coords(), obs.get_coords()):
                 self.game_over = True
-                if self.score > self.high_score:
-                    self.high_score = self.score
-                    self.save_high_score()
-                    self.canvas.itemconfig(self.high_score_text, text=f"High Score: {self.high_score}")
-                
-                self.game_over_text = self.canvas.create_text(
-                    WINDOW_SIZE//2, WINDOW_SIZE//2, 
-                    text="Game Over! Press R to restart", 
+                self.canvas.create_text(
+                    WINDOW_SIZE//2, WINDOW_SIZE//2,
+                    text="Game Over! Press R to restart",
                     fill=WHITE, font=("Arial", 24)
                 )
 
-        self.root.after(1000//FPS, self.update)
-    
+        self.root.after(1000//FPS, self.update_game)
+
+    def increase_speed(self):
+        if self.game_over:
+            return
+        self.speed += 0.5
+        self.root.after(1000, self.increase_speed)
+
     def check_collision(self, rect1, rect2):
-        # rect format: (x1, y1, x2, y2)
         return not (rect1[2] < rect2[0] or rect1[0] > rect2[2] or 
-                   rect1[3] < rect2[1] or rect1[1] > rect2[3])
+                    rect1[3] < rect2[1] or rect1[1] > rect2[3])
 
 root = tk.Tk()
 game = Game(root)
